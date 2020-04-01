@@ -1,0 +1,116 @@
+version: '3.1'
+
+# Have to build and push these services to Dockerhub before running, either manually or using Jenkins
+# When doing so, need to build code into the image, because not using bind-mount in production
+
+services:
+
+  webserver:
+    container_name: 'webserver'
+    image: nginx:latest
+    ports:
+      - "80:80"
+      # - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./app-site:/usr/share/nginx/html
+    networks:
+      - frontEndNet
+
+  client:
+    image: boslott/swimfun:client-prod1.0.6
+    ports:
+      - "8888:8888"
+    environment:
+      - NODE_ENV=production
+      - STAGING=false
+    networks:
+      - frontEndNet
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        # delay: 10s
+      restart_policy:
+        condition: on-failure
+    depends_on:
+      - gqlserver
+    # command: npm run start
+
+
+  gqlserver:
+    image: boslott/swimfun:gqlserver-prod1.0.1
+    ports:
+      # Only open this port when directly developing, otherwise, keep it closed
+      - "4444:4444"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - frontEndNet
+      - backEndNet
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        # delay: 10s
+      restart_policy:
+        condition: on-failure
+    depends_on:
+      - prisma
+      - mysql
+    # command: ./node_modules/nodemon/bin/nodemon.js -e js,graphql -x node src/index.js
+
+  prisma:
+    image: prismagraphql/prisma:1.22
+    ports:
+      # Only open this port when directly developing, otherwise, keep it closed
+      - "4466:4466"
+    networks:
+      - backEndNet
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      PRISMA_SECRET: ${PRISMA_SECRET}
+      PRISMA_CONFIG: |
+        managementApiSecret: ${PRISMA_MANAGEMENT_API_SECRET}
+        port: 4466
+        databases:
+          default:
+            connector: mysql
+            host: mysql
+            migrations: true
+            port: 3306
+            user: ${MYSQL_USER}
+            password: ${MYSQL_PASSWORD}
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        # delay: 10s
+      restart_policy:
+        condition: on-failure
+    ports:
+      - '3306:3306'
+    volumes:
+      - swimfun_mysql:/var/lib/mysql
+    networks:
+      - backEndNet
+
+
+networks:
+  frontEndNet:
+  backEndNet:
+
+volumes:
+  swimfun_mysql:
